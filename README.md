@@ -1,147 +1,222 @@
-# Go-Raft: Distributed Key-Value Store
+# RaftKV - Distributed Key-Value Store with Raft Consensus
 
-Academic Integrity Notice
+A production-ready, fault-tolerant distributed key-value store implementing the Raft consensus algorithm. This system provides strong consistency guarantees, automatic leader failover, and crash-safe persistence across a cluster of distributed servers.
 
-This repository serves as a portfolio piece documenting the architecture, design specifications, and performance characteristics of a Raft Consensus Protocol implementation. The source code is hosted in a private repository to comply with university academic integrity policies. Access to the full source code (Go, gRPC definitions, and test suite) can be granted to interviewers and hiring managers upon request.
+> **Note**: This repository is private for academic integrity. This README serves as a portfolio showcase of the implementation.
 
----
+## 🎯 Overview
 
-## Project Overview
+RaftKV is a complete implementation of the Raft consensus protocol that enables a distributed key-value store to maintain consistency across multiple nodes, even in the presence of network partitions, server failures, and concurrent operations. The system guarantees that all committed operations are durable and that the cluster can recover from complete shutdowns.
 
-Go-Raft is a CP-system (Consistent, Partition-Tolerant) distributed key-value store engineered in Golang. It implements the Raft Consensus Algorithm to manage replicated logs across a cluster of nodes, ensuring linearizable consistency and data durability.
+### Key Features
 
-The system is designed to maintain availability during leader failures and network partitions, automatically resolving split-brain scenarios through majority quorum voting. It serves as a foundational infrastructure component similar to etcd or Consul, supporting atomic `GET` and `PUT` operations via a gRPC API.
+- **Full Raft Consensus Implementation**: Complete leader election, log replication, and safety guarantees
+- **Automatic Failover**: Sub-second leader election and seamless transition during failures
+- **Crash-Safe Persistence**: Atomic writes with fsync guarantees for durable state storage
+- **Network Partition Handling**: Correct behavior during split-brain scenarios and partition healing
+- **Strong Consistency**: Linearizable operations with majority-based commit decisions
+- **Production-Ready**: Comprehensive error handling, timeout management, and recovery mechanisms
 
----
-
-## System Architecture
-
-The cluster architecture consists of five distinct server nodes and a frontend gateway, communicating exclusively via gRPC with Protocol Buffers.
-
-### 1. Frontend Service (Gateway)
-
-The frontend acts as a smart reverse proxy and client entry point listening on port 8001.
-
-- **Service Discovery:** Parses the cluster configuration to identify active node addresses.
-    
-- **Leader Routing:** Queries the cluster state to identify the current leader and forwards client `Put` and `Get` requests to the appropriate node.
-    
-- **Retry Logic:** Implements backoff and retry mechanisms to handle transient leader elections or network timeouts during forwarding.
-    
-
-### 2. Consensus Engine (Raft Nodes)
-
-Each node (listening on ports 9001-9005) operates an autonomous state machine based on the Raft specification.
-
-- **State Machine:** Nodes transition between **Follower**, **Candidate**, and **Leader** states based on election timeouts and RPC inputs.
-    
-- **Concurrency Model:** Utilizes Go channels and goroutines to handle blocking RPCs (AppendEntries, RequestVote) asynchronously from the main event loop, preventing heartbeat starvation.
-    
-
-### 3. Storage Layer (WAL)
-
-Data durability is achieved through a Write-Ahead Log (WAL) persisted to the local filesystem.
-
-- **Atomic Persistence:** Critical state (`currentTerm`, `votedFor`, and `log[]`) is flushed to disk using atomic file operations (write-to-temp followed by `rename`) before any RPC response is sent, ensuring crash consistency.
-    
-
----
-
-## Technical Implementation Details
-
-### Leader Election and Livelock Prevention
-
-To ensure high availability, the system implements a robust leader election mechanism.
-
-- **Randomized Timeouts:** To prevent "split votes"—where nodes repeatedly time out simultaneously and fail to elect a leader—the election timeout is randomized between 150ms and 300ms.
-    
-- **Term Logic:** Nodes strictly adhere to term monotonicity. If a Candidate or Leader discovers a peer with a higher term, it immediately reverts to the Follower state to prevent stale leadership.
-    
-
-### Log Replication and Consistency
-
-The system guarantees that once a log entry is committed, it will be present on all future leaders.
-
-- **Quorum Commit:** A `PUT` operation is only acknowledged to the client once the log entry has been replicated to a majority (3 out of 5) of nodes.
-    
-- **Log Matching:** The `AppendEntries` RPC enforces consistency by including `prevLogIndex` and `prevLogTerm`. Followers reject entries that do not align with their local history, triggering a reconciliation process where the leader decrements its `nextIndex` for that follower until a matching point is found.
-    
-- **No-Op Commits:** Upon election, a new leader commits a "no-op" entry to assert authority and indirectly commit entries from previous terms, ensuring the `commitIndex` advances correctly.
-    
-
-### Fault Tolerance and Partition Handling
-
-The system is tested to survive specific failure modes described in the design specification.
-
-- **Leader Failover:** The cluster detects leader crashes via missing heartbeats and elects a new leader within the election timeout window.
-    
-- **Split-Brain Resolution:** In the event of a network partition (e.g., a 3-node vs. 2-node split), the minority partition automatically ceases to accept writes because it cannot achieve a quorum. The majority partition continues to operate, preserving consistency.
-    
-- **Partition Healing:** When network connectivity is restored, nodes in the minority partition recognize the higher term from the majority leader, step down, and backfill their logs to match the authoritative state.
-    
-
-### Disaster Recovery
-
-- **Full Cluster Restart:** The system supports a complete shutdown and restart. Nodes reload their persistent state from disk upon boot, reconstruct their volatile state machines (Hash Maps), and resume operations without data loss.
-    
-- **Crash Recovery:** Individual nodes can be restarted via the `StartServer` RPC. They automatically rejoin the cluster and catch up on missed log entries via the Leader's replication mechanism.
-    
-
----
-
-## Performance & Testing
-
-The implementation was validated against a strict test suite covering correctness and resilience scenarios.
-
-|**Test Category**|**Description**|**Status**|
-|---|---|---|
-|**Basic KV Operations**|Verified linearizable Get/Put operations on a healthy cluster.|Passed|
-|**Leader Failure**|Verified continuous availability during forced leader process termination.|Passed|
-|**Minority Partition**|Confirmed writes are rejected when <3 nodes are reachable.|Passed|
-|**Majority Partition**|Confirmed writes succeed in the partition containing 3 nodes.|Passed|
-|**Persistence**|Verified data integrity across multiple full-cluster restarts.|Passed|
-|**Concurrency**|Stress tested with concurrent client requests to identify race conditions.|Passed|
-
----
-
-## Deployment Configuration
-
-The system is configured via a standard `config.ini` file, allowing for flexible deployment topologies.
-
-**Configuration Parameters:**
-
-- `base_address`: Localhost or IP address for binding.
-    
-- `base_port`: Starting port for Raft peer communication (default: 9001).
-    
-- `persistent_state_path`: Directory path for WAL storage (e.g., `raft_state/`).
-    
-
-Run Instructions (Docker):
-
-The project includes a Dockerfile and docker-compose.yml to orchestrate the 5-node cluster and frontend service.
-
-Bash
+## 🏗️ Architecture
 
 ```
-# Build the Go binaries
-make build
-
-# Start the cluster
-docker-compose up -d
-
-# Check cluster status via logs
-docker-compose logs -f
+┌─────────────┐
+│   Client    │
+└──────┬──────┘
+       │ gRPC
+       ▼
+┌─────────────────┐
+│  Frontend       │  Port 8001
+│  (Leader Proxy) │
+└──────┬──────────┘
+       │
+       ├──────────────┬──────────────┬──────────────┐
+       ▼              ▼              ▼              ▼
+┌──────────┐  ┌──────────┐  ┌──────────┐  ┌──────────┐
+│ Server 0 │  │ Server 1 │  │ Server 2 │  │ Server N │
+│ Port 9001│  │ Port 9002│  │ Port 9003│  │ Port 900N│
+│          │  │          │  │          │  │          │
+│ ┌──────┐ │  │ ┌──────┐ │  │ ┌──────┐ │  │ ┌──────┐ │
+│ │ Raft │ │  │ │ Raft │ │  │ │ Raft │ │  │ │ Raft │ │
+│ │State │ │  │ │State │ │  │ │State │ │  │ │State │ │
+│ └──────┘ │  │ └──────┘ │  │ └──────┘ │  │ └──────┘ │
+│ ┌──────┐ │  │ ┌──────┐ │  │ ┌──────┐ │  │ ┌──────┐ │
+│ │  KV  │ │  │ │  KV  │ │  │ │  KV  │ │  │ │  KV  │ │
+│ │Store │ │  │ │Store │ │  │ │Store │ │  │ │Store │ │
+│ └──────┘ │  │ └──────┘ │  │ └──────┘ │  │ └──────┘ │
+│ ┌──────┐ │  │ ┌──────┐ │  │ ┌──────┐ │  │ ┌──────┐ │
+│ │Persist││  │ │Persist││  │ │Persist││  │ │Persist││
+│ └──────┘ │  │ └──────┘ │  │ └──────┘ │  │ └──────┘ │
+└──────────┘  └──────────┘  └──────────┘  └──────────┘
 ```
+
+The system consists of a frontend service that routes client requests to the appropriate Raft server, and a cluster of Raft servers that maintain replicated state through the consensus protocol. Each server maintains its own Raft state machine, key-value store, and persistent state.
+
+## 📋 Core Components
+
+### 1. Leader Election
+
+- **Randomized Timeouts**: 150-300ms election timeouts prevent split votes
+- **Term-Based Coordination**: Ensures at most one leader per term
+- **Concurrent Vote Handling**: Thread-safe vote collection with proper synchronization
+- **Election Safety**: Implements Raft's guarantee that at most one leader exists per term
+
+### 2. Log Replication
+
+- **Append-Only Log**: All operations are logged before execution
+- **Majority Commit**: Entries committed only after replication to majority
+- **Consistency Checking**: `prevLogIndex` and `prevLogTerm` ensure log matching
+- **Conflict Resolution**: Automatic log truncation on inconsistencies
+- **NextIndex Tracking**: Efficient log synchronization with follower-specific indices
+
+### 3. State Machine
+
+- **Deterministic Application**: Committed entries applied in strict order
+- **Thread-Safe Operations**: Concurrent-safe state machine updates using mutexes
+- **Read Consistency**: All servers serve reads from applied state
+- **Last Applied Tracking**: Ensures entries are applied exactly once
+
+### 4. Persistence
+
+- **Atomic Writes**: Temp file → fsync → atomic rename pattern prevents corruption
+- **Crash Safety**: State persisted before responding to clients
+- **Full Recovery**: Cluster can recover from complete shutdown
+- **State Files**: JSON-based storage with per-server state files
+- **Persistent Fields**: Current term, voted-for, and complete log are all persisted
+
+### 5. Fault Tolerance
+
+- **Leader Failover**: Automatic election within seconds of leader failure
+- **Network Partitions**: Correct behavior during split-brain scenarios
+- **Server Recovery**: Seamless rejoin and log catch-up after restart
+- **Minority Failures**: System continues operating with majority available
+- **Split-Brain Prevention**: Only majority partitions can make progress
+
+## 🔐 Safety Guarantees
+
+RaftKV implements all five Raft safety properties:
+
+1. **Election Safety**: At most one leader can be elected in a given term
+2. **Leader Append-Only**: Leaders never overwrite or delete entries in their logs
+3. **Log Matching**: If two logs contain an entry with the same index and term, they are identical up to that point
+4. **Leader Completeness**: If a log entry is committed in a given term, it will be present in all future leaders
+5. **State Machine Safety**: All servers apply the same sequence of log entries to their state machines
+
+These guarantees ensure that the system maintains consistency even under concurrent operations, network partitions, and server failures.
+
+## 🧪 Testing
+
+The project includes comprehensive test suites covering:
+
+- **Basic Operations**: Configuration validation, leader election, PUT/GET operations, log replication
+- **Fault Tolerance**: Leader failure detection, server recovery, minority failures, split-brain prevention
+- **Persistence**: State persistence, full cluster restart, network partitions, partition healing
+
+All tests are language-agnostic and communicate with the servers via gRPC, ensuring the implementation works correctly across different failure scenarios.
+
+## 🛠️ Technology Stack
+
+- **Language**: Go 1.21+
+- **RPC Framework**: gRPC with Protocol Buffers
+- **Concurrency**: Goroutines with mutex-based synchronization
+- **Persistence**: JSON-based state files with atomic writes
+- **Testing**: Python-based language-agnostic test suite
+
+## 📊 Performance Characteristics
+
+- **Leader Election**: < 1 second in typical scenarios
+- **Replication Latency**: ~100ms heartbeat interval
+- **Write Throughput**: Limited by network latency and majority replication
+- **Read Latency**: Sub-millisecond (local state machine access)
+- **Recovery Time**: Seconds for full cluster restart
+
+## 🔍 Implementation Highlights
+
+### Concurrency Model
+
+- Fine-grained locking with `sync.Mutex` for Raft state
+- Separate locks for RPC clients to prevent deadlocks
+- Channel-based notification for commit events
+- Goroutine-based background tasks (heartbeats, log application)
+- Careful lock ordering to prevent circular dependencies
+
+### Persistence Strategy
+
+```go
+// Atomic write pattern ensures crash safety
+tempFile := path + ".tmp"
+Write(tempFile) → Sync() → Rename(tempFile, path)
+```
+
+This three-step process ensures that state files are never in a corrupted state, even if the process crashes mid-write. The atomic rename operation is guaranteed by the filesystem.
+
+### Error Handling
+
+- Graceful degradation during network failures
+- Automatic retry with exponential backoff for RPC calls
+- Context-based timeout management
+- Comprehensive error logging for debugging
+- Leadership verification before responding to clients
+
+### Network Communication
+
+- gRPC-based RPC for type-safe communication
+- Protocol Buffers for efficient serialization
+- Connection pooling and reuse
+- Timeout handling for all network operations
+
+## 📚 Project Structure
+
+```
+.
+├── cmd/
+│   ├── frontend/     # Frontend service entry point
+│   └── server/       # Raft server entry point
+├── internal/
+│   ├── config/       # Configuration management
+│   ├── frontend/     # Frontend service implementation
+│   ├── raftpb/       # Protocol Buffer definitions
+│   └── server/       # Raft server implementation
+└── testsuite/        # Comprehensive test suites
+```
+
+The codebase follows Go best practices with clear separation of concerns, internal packages for implementation details, and a clean command structure.
+
+## 🎓 Technical Achievements
+
+This project demonstrates mastery of:
+
+- **Distributed Systems Fundamentals**: Consensus algorithms, replication, fault tolerance, network partitions
+- **Concurrency**: Thread-safe operations, race condition prevention, deadlock avoidance, lock ordering
+- **System Design**: Service architecture, RPC communication, state management, persistence strategies
+- **Production Engineering**: Error handling, logging, crash-safe persistence, comprehensive testing
+- **Protocol Implementation**: Faithful implementation of the Raft consensus algorithm with all safety properties
+
+## 📝 API Design
+
+### Frontend Service
+
+- `StartRaft(n)` - Initialize a fresh cluster with n servers
+- `StartServer(id)` - Start a single server and add to cluster
+- `Get(key)` - Retrieve value for key (any server)
+- `Put(key, value)` - Store key-value pair (leader only)
+
+### Server Service
+
+- `ping()` - Health check endpoint
+- `GetState()` - Return current Raft state (term, leader status, commit index)
+- `Get(key)` - Read from local state machine
+- `Put(key, value)` - Write operation (leader only)
+- `AppendEntries(...)` - Raft log replication RPC
+- `RequestVote(...)` - Raft leader election RPC
+
+All operations are designed to be idempotent where possible, and the system handles leader changes gracefully by redirecting clients to the new leader.
+
+## 🙏 Acknowledgments
+
+- Raft paper by Diego Ongaro and John Ousterhout
+- Protocol design based on the Raft consensus algorithm
 
 ---
 
-## Contact
 
-If you would like to discuss the architectural decisions, view the private source code, or see a demonstration of the failure recovery mechanisms, please contact me.
-
-- **Email:** [Your Email]
-    
-- **LinkedIn:** [Your Profile]
-    
-- **Portfolio:** [Your Website]
