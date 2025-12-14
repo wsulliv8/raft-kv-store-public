@@ -4,7 +4,7 @@ A production-ready, fault-tolerant distributed key-value store implementing the 
 
 > **Note**: This repository is private for academic integrity. This README serves as a portfolio showcase of the implementation.
 
-> ## Contributors
+## Contributors
 
 This project was created by:
 
