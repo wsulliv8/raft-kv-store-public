@@ -11,6 +11,10 @@ This project was created by:
 - **Dylan Pina** ([@DylanPina](https://github.com/DylanPina))
 - **Will Sullivan** ([@wsulliv8](https://github.com/wsulliv8))
 
+[![Go](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://golang.org/)
+[![gRPC](https://img.shields.io/badge/gRPC-1.76+-4285F4.svg)](https://grpc.io/)
+[![Protocol Buffers](https://img.shields.io/badge/Protocol%20Buffers-3.21+-4A90E2.svg)](https://protobuf.dev/)
+
 ## 🎯 Overview
 
 RaftKV is a complete implementation of the Raft consensus protocol that enables a distributed key-value store to maintain consistency across multiple nodes, even in the presence of network partitions, server failures, and concurrent operations. The system guarantees that all committed operations are durable and that the cluster can recover from complete shutdowns.
